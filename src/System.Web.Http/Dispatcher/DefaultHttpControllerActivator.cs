@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System.Net.Http;
+using System.Threading;
 using System.Web.Http.Controllers;
 using System.Web.Http.Internal;
 using System.Web.Http.Properties;
@@ -31,16 +32,22 @@ namespace System.Web.Http.Dispatcher
         }
 
         /// <summary>
-        /// Creates the <see cref="IHttpController"/> specified by <paramref name="controllerType"/> using the given <paramref name="controllerContext"/>
+        /// Creates the <see cref="IHttpController"/> specified by <paramref name="controllerType"/> using the given <paramref name="request"/>
         /// </summary>
-        /// <param name="controllerContext">The controller context.</param>
+        /// <param name="request">The request message.</param>
         /// <param name="controllerType">Type of the controller.</param>
+        /// <param name="controllerDescriptor">The controller descriptor</param>
         /// <returns>An instance of type <paramref name="controllerType"/>.</returns>
-        public IHttpController Create(HttpControllerContext controllerContext, Type controllerType)
+        public IHttpController Create(HttpRequestMessage request, HttpControllerDescriptor controllerDescriptor, Type controllerType)
         {
-            if (controllerContext == null)
+            if (request == null)
             {
-                throw Error.ArgumentNull("controllerContext");
+                throw Error.ArgumentNull("request");
+            }
+
+            if (controllerDescriptor == null)
+            {
+                throw Error.ArgumentNull("controllerDescriptor");
             }
 
             if (controllerType == null)
@@ -63,13 +70,13 @@ namespace System.Web.Http.Dispatcher
 
                     // Otherwise create a delegate for creating a new instance of the type
                     Func<IHttpController> activator = TypeActivator.Create<IHttpController>(controllerType);
-                    Tuple<HttpControllerDescriptor, Func<IHttpController>> cacheItem = Tuple.Create(controllerContext.ControllerDescriptor, activator);
+                    Tuple<HttpControllerDescriptor, Func<IHttpController>> cacheItem = Tuple.Create(controllerDescriptor, activator);
                     Interlocked.CompareExchange(ref _fastCache, cacheItem, null);
 
                     // Execute the delegate
                     return activator();
                 }
-                else if (_fastCache.Item1 == controllerContext.ControllerDescriptor)
+                else if (_fastCache.Item1 == controllerDescriptor)
                 {
                     // If the key matches and we already have the delegate for creating an instance then just execute it
                     return _fastCache.Item2();
@@ -78,7 +85,7 @@ namespace System.Web.Http.Dispatcher
                 {
                     // If the key doesn't match then lookup/create delegate in the HttpControllerDescriptor.Properties for
                     // that HttpControllerDescriptor instance
-                    Func<IHttpController> activator = (Func<IHttpController>)controllerContext.ControllerDescriptor.Properties.GetOrAdd(
+                    Func<IHttpController> activator = (Func<IHttpController>)controllerDescriptor.Properties.GetOrAdd(
                         _cacheKey,
                         key => TypeActivator.Create<IHttpController>(controllerType));
                     return activator();
@@ -87,6 +94,30 @@ namespace System.Web.Http.Dispatcher
             catch (Exception ex)
             {
                 throw Error.InvalidOperation(ex, SRResources.DefaultControllerFactory_ErrorCreatingController, controllerType);
+            }
+        }
+
+        /// <summary>
+        /// Releases the <paramref name="controller"/> instance 
+        /// </summary>
+        /// <param name="controllerContext">The <see cref="HttpControllerContext"/> containing </param>
+        /// <param name="controller">The <see cref="IHttpController"/> that is to be released</param>
+        public void Release(IHttpController controller, HttpControllerContext controllerContext)
+        {
+            if (controller == null)
+            {
+                throw Error.ArgumentNull("controller");
+            }
+
+            if (controllerContext == null)
+            {
+                throw Error.ArgumentNull("controllerContext");
+            }
+
+            IDisposable disposable = controller as IDisposable;
+            if (disposable != null)
+            {
+                disposable.Dispose();
             }
         }
     }

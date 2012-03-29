@@ -1,47 +1,41 @@
-﻿using System.Collections.Generic;
+﻿using System.Net.Http;
 using System.Web.Http.Controllers;
-using System.Web.Http.Dispatcher;
 using System.Web.Http.Properties;
 
 namespace System.Web.Http.Tracing.Tracers
 {
     /// <summary>
-    /// Tracer for <see cref="IHttpControllerFactory"/>.
+    /// Tracer for <see cref=" HttpControllerDescriptor"/>
     /// </summary>
-    internal class HttpControllerFactoryTracer : IHttpControllerFactory
+    public class HttpControllerDescriptorTracer : HttpControllerDescriptor
     {
         private const string CreateControllerMethodName = "CreateController";
         private const string ReleaseControllerMethodName = "ReleaseController";
 
-        private readonly IHttpControllerFactory _innerFactory;
+        private readonly HttpControllerDescriptor _innerDescriptor;
         private readonly ITraceWriter _traceWriter;
 
-        public HttpControllerFactoryTracer(IHttpControllerFactory innerFactory, ITraceWriter traceWriter)
+        public HttpControllerDescriptorTracer(HttpConfiguration configuration, string controllerName, Type controllerType, HttpControllerDescriptor innerDescriptor, ITraceWriter traceWriter)
+            : base(configuration, controllerName, controllerType)
         {
-            _innerFactory = innerFactory;
+            _innerDescriptor = innerDescriptor;
             _traceWriter = traceWriter;
         }
 
-        IHttpController IHttpControllerFactory.CreateController(HttpControllerContext controllerContext, string controllerName)
+        public override IHttpController CreateController(HttpRequestMessage request)
         {
             IHttpController controller = null;
 
             _traceWriter.TraceBeginEnd(
-                controllerContext.Request,
+                request,
                 TraceCategories.ControllersCategory,
                 TraceLevel.Info,
-                _innerFactory.GetType().Name,
+                _innerDescriptor.GetType().Name,
                 CreateControllerMethodName,
-                beginTrace: (tr) =>
-                {
-                    tr.Message = Error.Format(
-                                    SRResources.TraceControllerNameAndRouteMessage, 
-                                    controllerName, 
-                                    FormattingUtilities.RouteToString(controllerContext.RouteData));
-                },
+                beginTrace: null,
                 execute: () =>
                 {
-                    controller = _innerFactory.CreateController(controllerContext, controllerName);
+                    controller = _innerDescriptor.CreateController(request);
                 },
                 endTrace: (tr) =>
                 {
@@ -53,24 +47,19 @@ namespace System.Web.Http.Tracing.Tracers
 
             if (controller != null && !(controller is HttpControllerTracer))
             {
-                controller = new HttpControllerTracer(controller, _traceWriter);
+                return new HttpControllerTracer(controller, _traceWriter);
             }
 
             return controller;
         }
 
-        IDictionary<string, HttpControllerDescriptor> IHttpControllerFactory.GetControllerMapping()
-        {
-            return _innerFactory.GetControllerMapping();
-        }
-
-        void IHttpControllerFactory.ReleaseController(HttpControllerContext controllerContext, IHttpController controller)
+        public override void ReleaseController(IHttpController controller, HttpControllerContext controllerContext)
         {
             _traceWriter.TraceBeginEnd(
                 controllerContext.Request,
                 TraceCategories.ControllersCategory,
                 TraceLevel.Info,
-                _innerFactory.GetType().Name,
+                _innerDescriptor.GetType().Name,
                 ReleaseControllerMethodName,
                 beginTrace: (tr) =>
                 {
@@ -79,7 +68,7 @@ namespace System.Web.Http.Tracing.Tracers
                 execute: () =>
                 {
                     IHttpController actualController = HttpControllerTracer.ActualController(controller);
-                    _innerFactory.ReleaseController(controllerContext, actualController);
+                    _innerDescriptor.ReleaseController(actualController, controllerContext);
                 },
                 endTrace: null,
                 errorTrace: null);
